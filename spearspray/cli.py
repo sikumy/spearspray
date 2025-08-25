@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+from importlib.resources import files
 
 import argcomplete
 from colorama import init
@@ -39,7 +40,7 @@ def parse_arguments():
 
     patterns_parser = argparse.ArgumentParser(add_help=False)
     patterns_group = patterns_parser.add_argument_group('Patterns', 'Configuration for patterns used in spraying')
-    patterns_group.add_argument('-i', '--input', type=str, default='patterns.txt', help='Patterns file (default: patterns.txt).')
+    patterns_group.add_argument('-i', '--input', type=str, default=str(files("spearspray").joinpath("patterns.txt")), help='Patterns file (default: patterns.txt).')
     patterns_group.add_argument('-x', '--extra', type=str, default=None, help='Single word (no spaces or commas).')
     patterns_group.add_argument('-sep', '--separator', type=str, default=None, help='Separator for patterns.')
     patterns_group.add_argument('-suf', '--suffix', type=str, default=None, help='Suffix for patterns.')
