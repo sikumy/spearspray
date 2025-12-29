@@ -16,6 +16,7 @@
   - [From GitHub (Recommended)](#from-github-recommended)
   - [Using Poetry](#using-poetry)
   - [Direct Installation](#direct-installation)
+  - [NixOS](#nixos)
 - [Usage](#usage)
   - [Basic Usage](#basic-usage)
   - [Advanced Usage](#advanced-usage)
@@ -109,6 +110,15 @@ poetry run spearspray --help
 
 ```bash
 pip install git+https://github.com/sikumy/spearspray.git
+```
+
+### NixOS
+
+For Nix or NixOS users is a package available. Keep in mind that the latest releases might only
+be present in the `unstable` channel.
+
+```bash
+nix-env -iA nixos.spearspray
 ```
 
 ## Usage
