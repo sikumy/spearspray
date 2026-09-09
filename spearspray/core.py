@@ -34,6 +34,7 @@ class SpearSpray:
         self.username = args.username
         self.password = args.password
         self.target = args.domain_controller
+        self.kdc = args.kdc or args.domain_controller
         self.query = args.query
         self.ssl = args.ssl
         self.ldap_page_size = args.ldap_page_size
@@ -83,6 +84,10 @@ class SpearSpray:
  
         ldap_instance, ldap_connection = connect_to_ldap(self.target, self.domain, self.username, self.password, self.ssl, self.ldap_page_size)
 
+        if ldap_connection is None:
+            self.log.error(f"{RED}[-]{RESET} Failed to establish LDAP connection. Exiting.")
+            sys.exit(1)
+
         domain_policy = get_domain_password_policy(ldap_instance, ldap_connection)
         handle_domain_password_policy(domain_policy)
 
@@ -105,7 +110,7 @@ class SpearSpray:
         filtered_variables = get_used_variables(variables_registered, selected_pattern)
 
         # Execute password spraying attack
-        kerberos_instance = Kerberos(domain=self.domain, kdc=self.target, jitter=self.jitter, max_rps=self.max_rps, neo4j_instance=neo4j_instance)
+        kerberos_instance = Kerberos(domain=self.domain, kdc=self.kdc, jitter=self.jitter, max_rps=self.max_rps, neo4j_instance=neo4j_instance)
         self.log.warning(f"{YELLOW}[*]{RESET} Starting password spraying against {len(users_objects)} users...")
         self._spray(kerberos_instance, users_objects, selected_pattern, filtered_variables)
 
