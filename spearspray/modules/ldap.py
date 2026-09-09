@@ -1,9 +1,11 @@
 import logging
+import ssl
 from datetime import timedelta
-from typing import Dict, List, Iterable
+from typing import Dict, List, Iterable, Optional
 
 import ldap3
-from ldap3.core.exceptions import LDAPException
+from ldap3 import NTLM, SIMPLE
+from ldap3.core.exceptions import LDAPException, LDAPBindError
 
 from spearspray.utils.constants import GREEN, RED, YELLOW, RESET
 
@@ -15,7 +17,7 @@ class Ldap:
         "badPwdCount", "pwdLastSet", "msDS-ResultantPSO"
     }
 
-    def __init__(self, target, domain, username, password, ssl, page_size):
+    def __init__(self, target, domain, username, password, ssl_enabled, page_size):
         
         # TODO: Maybe add Context Manager for simplifying connection management
         
@@ -23,60 +25,141 @@ class Ldap:
         self.domain = domain
         self.username = username
         self.password = password
-        self.use_ssl = ssl 
+        self.use_ssl = ssl_enabled 
         self.page_size = page_size
         
         self.log = logging.getLogger(__name__)
-        self.port = 636 if ssl else 389
         self.base_dn = self._get_basedn_from_domain()
 
     def _get_basedn_from_domain(self) -> str:
         """Convert domain name to Base DN format."""
         return ','.join(f'DC={part}' for part in self.domain.split('.'))
 
-    def _login(self) -> ldap3.Connection:  
-        """Create LDAP connection and bind using NTLM authentication."""
-        server = ldap3.Server(self.target, self.port, self.use_ssl, ldap3.ALL)
-        user = f"{self.domain}\\{self.username}"
+    def _create_connection(self, use_ssl: bool, insecure_ssl: bool, port: int) -> ldap3.Connection:
+        """Create connection with specified parameters."""
+        
+        # Create server with specified SSL settings
+        tls = None
+        if use_ssl:
+            validate = ssl.CERT_NONE if insecure_ssl else ssl.CERT_REQUIRED
+            tls = ldap3.Tls(
+                validate=validate,
+                version=ssl.PROTOCOL_TLSv1_2,
+                ciphers='ALL:@SECLEVEL=0',
+            )
 
-        # TODO: Add Kerberos authentication
+        server = ldap3.Server(
+            host=self.target,
+            port=port,
+            use_ssl=use_ssl,
+            tls=tls,
+            get_info=ldap3.ALL,
+            connect_timeout=5
+        )
 
-        return ldap3.Connection(server, user, self.password, authentication=ldap3.NTLM, auto_bind=True)
+        # For LDAPS, use SIMPLE auth (avoids NTLM channel binding issues)
+        # For plain LDAP, use NTLM
+        if use_ssl:
+            # SIMPLE auth over LDAPS - use UPN format (user@domain)
+            user = f"{self.username}@{self.domain}"
+            auth_method = SIMPLE
+        else:
+            # NTLM auth for plain LDAP
+            user = f"{self.domain}\\{self.username}"
+            auth_method = NTLM
 
-    def connect_via_credentials(self) -> ldap3.Connection:
-        """Connect to LDAP server with SSL fallback if required."""
+        return ldap3.Connection(
+            server=server,
+            user=user,
+            password=self.password,
+            authentication=auth_method,
+            auto_bind=True,
+            raise_exceptions=True,
+            auto_referrals=False
+        )
+
+    def _try_ldaps_strict(self) -> Optional[ldap3.Connection]:
+        """Try LDAPS with strict certificate validation."""
+        conn = self._create_connection(use_ssl=True, insecure_ssl=False, port=636)
+        self.log.success(f"{GREEN}[+]{RESET} LDAPS (strict) - Login successful.")
+        return conn
+
+    def _try_ldaps_insecure(self) -> Optional[ldap3.Connection]:
+        """Try LDAPS without certificate validation."""
+        conn = self._create_connection(use_ssl=True, insecure_ssl=True, port=636)
+        self.log.success(f"{GREEN}[+]{RESET} LDAPS (insecure) - Login successful.")
+        return conn
+
+    def _try_ldap_plain(self) -> Optional[ldap3.Connection]:
+        """Try plain LDAP connection with NTLM."""
+        conn = self._create_connection(use_ssl=False, insecure_ssl=False, port=389)
+        self.log.success(f"{GREEN}[+]{RESET} LDAP - Login successful.")
+        return conn
+
+    def _try_ldaps_on_strong_auth_required(self) -> Optional[ldap3.Connection]:
+        """Try LDAPS when strongAuthRequired was detected on plain LDAP."""
+        self.log.info("[!] DC requires LDAP signing/sealing (strongAuthRequired). Trying LDAPS with SIMPLE auth.")
+        try:
+            return self._try_ldaps_strict()
+        except ssl.SSLCertVerificationError:
+            self.log.warning(f"{YELLOW}[!]{RESET} LDAPS (strict) failed certificate verification; trying insecure LDAPS.")
+            return self._try_ldaps_insecure()
+
+    @staticmethod
+    def _is_stronger_auth_required(exc: LDAPBindError) -> bool:
+        """Check if the error is strongAuthRequired."""
+        error_str = str(exc).lower()
+        if "strongerauthrequired" in error_str or "strongauthrequired" in error_str:
+            return True
+        try:
+            if exc.args and isinstance(exc.args[0], dict):
+                result_dict = exc.args[0]
+                code = result_dict.get("result")
+                desc = (result_dict.get("description") or "").lower()
+                return code == 8 or "strongauthrequired" in desc
+        except Exception:
+            pass
+        return False
+
+    def connect_via_credentials(self) -> Optional[ldap3.Connection]:
+        """Connect to LDAP server with automatic fallback strategies."""
+        
+        # If SSL explicitly requested, try LDAPS strategies first
         if self.use_ssl:
             try:
-                self.log.info("[!] Using SSL connection.")
-                ldap_connection = self._login()
-                self.log.success(f"{GREEN}[+]{RESET} LDAPS - Login successful.")
-                return ldap_connection
-            except ldap3.core.exceptions.LDAPBindError:
-                self.log.exception(f"{RED}[-]{RESET} An error occurred during LDAPS connection.")
-                
-            except Exception:
-                self.log.exception(f"{RED}[-]{RESET} An unexpected error occurred during LDAPS connection.")
-                
-
-        try:
-            ldap_connection = self._login()
-            self.log.success(f"{GREEN}[+]{RESET} LDAP - Login successful.")
-            return ldap_connection
-        except ldap3.core.exceptions.LDAPBindError as exc:
-            # Handle server-enforced SSL requirement (common security policy)
-            if "strongerAuthRequired" in str(exc):
-                self.log.info("[!] Server requires SSL, retrying with LDAPS.")
-                self.use_ssl = True
-                self.port = 636
+                return self._try_ldaps_strict()
+            except ssl.SSLCertVerificationError:
+                self.log.warning(f"{YELLOW}[!]{RESET} LDAPS certificate verification failed, trying insecure mode.")
                 try:
-                    ldap_connection = self._login()
-                    self.log.success(f"{GREEN}[+]{RESET} LDAPS - Login successful.")
-                    return ldap_connection
-                except ldap3.core.exceptions.LDAPBindError:
-                    self.log.exception(f"{RED}[-]{RESET} An error occurred during LDAPS connection.")
+                    return self._try_ldaps_insecure()
+                except LDAPBindError as e:
+                    self.log.error(f"{RED}[-]{RESET} LDAPS connection failed: {e}")
+                    return None
+            except LDAPBindError as e:
+                self.log.error(f"{RED}[-]{RESET} LDAPS connection failed: {e}")
+                return None
+            except Exception as e:
+                self.log.exception(f"{RED}[-]{RESET} Unexpected error during LDAPS connection.")
+                return None
+
+        # Try plain LDAP first, fallback to LDAPS if strongAuthRequired
+        try:
+            return self._try_ldap_plain()
+        except LDAPBindError as exc:
+            if self._is_stronger_auth_required(exc):
+                try:
+                    return self._try_ldaps_on_strong_auth_required()
+                except LDAPBindError as e:
+                    self.log.error(f"{RED}[-]{RESET} LDAPS fallback failed: {e}")
+                    return None
+                except Exception as e:
+                    self.log.exception(f"{RED}[-]{RESET} Unexpected error during LDAPS fallback.")
+                    return None
             else:
-                # Other authentication errors (wrong credentials, etc.)
-                self.log.exception(f"{RED}[-]{RESET} An error occurred during LDAP connection.")
+                self.log.error(f"{RED}[-]{RESET} LDAP connection failed: {exc}")
+                return None
+        except Exception as e:
+            self.log.exception(f"{RED}[-]{RESET} Unexpected error during LDAP connection.")
                 
 
     def close_connection(self, ldap_connection: ldap3.Connection) -> None:
