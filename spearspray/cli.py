@@ -25,6 +25,7 @@ def parse_arguments():
     ldap_group.add_argument('-q', '--query', default=DEFAULT_LDAP_USERS_QUERY, help='Custom LDAP query to retrieve users for spraying.')
     ldap_group.add_argument('--ssl', action='store_true', help='Use SSL connection for LDAP. Also known as LDAPS (default: False).' )
     ldap_group.add_argument('-lps', '--ldap-page-size', type=int, default=200, help='LDAP paging size for large result sets (default: 200).')
+    ldap_group.add_argument('--skip-port-check', action='store_true', help='Skip TCP reachability checks for LDAP (389/636) and Kerberos (88) ports before enumeration and spraying.')
 
     neo4j_parser = argparse.ArgumentParser(add_help=False)
     neo4j_group = neo4j_parser.add_argument_group('Neo4j Configuration', 'Configuration for Neo4j connection. It will be use to mark users as owned')

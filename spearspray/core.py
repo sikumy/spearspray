@@ -21,6 +21,7 @@ from spearspray.utils.ldap_utils import (
     filter_threshold_users,
     filter_pso_users
 )
+from spearspray.utils.net_utils import check_port_or_exit
 from spearspray.modules.neo4j import Neo4j
 
 class SpearSpray:
@@ -38,6 +39,7 @@ class SpearSpray:
         self.query = args.query
         self.ssl = args.ssl
         self.ldap_page_size = args.ldap_page_size
+        self.skip_port_check = args.skip_port_check
 
         # Neo4j connection parameters
         self.neo4j_username = args.neo4j_username
@@ -80,8 +82,18 @@ class SpearSpray:
             if neo4j_instance.connect() is None:
                 sys.exit(1)
 
+        # Port reachability checks (fail fast before any LDAP work if the KDC is unreachable)
+
+        ldap_port = 636 if self.ssl else 389
+        check_port_or_exit(self.target, ldap_port, "LDAPS" if self.ssl else "LDAP", skip=self.skip_port_check)
+        check_port_or_exit(
+            self.kdc, 88, "Kerberos",
+            skip=self.skip_port_check,
+            hint=f"You can also point the spraying to a different domain controller with {YELLOW}-kdc/--kdc{RESET}.",
+        )
+
         # LDAP connection and enumeration
- 
+
         ldap_instance, ldap_connection = connect_to_ldap(self.target, self.domain, self.username, self.password, self.ssl, self.ldap_page_size)
 
         if ldap_connection is None:
