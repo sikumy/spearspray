@@ -59,7 +59,9 @@
 - **Threshold Management**: Automatic filtering of users near lockout thresholds
 - **Multi-threaded**: Configurable thread count for performance optimization
 - **Rate Limiting**: Control requests per second to prevent overwhelming domain controllers
-- **SSL/LDAPS Support**: Secure LDAP connections when required
+- **SSL/LDAPS Support**: Secure LDAP connections when required, with automatic fallback to LDAPS when the DC enforces `strongAuthRequired` (LDAP signing/sealing)
+- **Split LDAP/Kerberos Targets**: Enumerate users on one DC and spray Kerberos against a different KDC (`-kdc`)
+- **Pre-flight Port Checks**: TCP reachability checks for LDAP (389/636) and Kerberos (88) fail fast before any enumeration or spraying (bypass with `--skip-port-check`)
 
 ### Advanced Pattern System
 - **Dynamic Variables**: Support for user-specific data (name, date of last password change...)
@@ -129,10 +131,12 @@ nix-env -iA nixos.spearspray
 - `-d, --domain`: LDAP domain name (e.g., fabrikam.local) **[Required]**
 - `-u, --username`: LDAP username **[Required]**
 - `-p, --password`: LDAP password **[Required]**
-- `-dc, --domain-controller`: FQDN or IP of domain controller **[Required]**
+- `-dc, --domain-controller`: FQDN or IP of the domain controller used for LDAP enumeration **[Required]**
+- `-kdc, --kdc`: FQDN or IP of the KDC used for Kerberos spraying (defaults to `-dc` if not set)
 - `-q, --query`: Custom LDAP query (default: enabled users excluding blocked accounts)
 - `--ssl`: Use SSL/LDAPS connection (port 636)
 - `-lps, --ldap-page-size`: LDAP paging size (default: 200)
+- `--skip-port-check`: Skip TCP reachability checks for LDAP (389/636) and Kerberos (88) ports before enumeration and spraying
 
 #### Neo4j Integration
 - `-nu, --neo4j-username`: Neo4j username for BloodHound integration
@@ -188,6 +192,9 @@ SpearSpray supports a series of arguments that increase the customization of Pas
 ```bash
 # Domain controllers might require an encrypted connection
 spearspray -u pentester -p Password123 -d fabrikam.local -dc dc01.fabrikam.local --ssl
+
+# Enumerate users on one DC (LDAP) and spray Kerberos against a different DC/KDC
+spearspray -u pentester -p Password123 -d fabrikam.local -dc dc01.fabrikam.local -kdc dc02.fabrikam.local
 
 # Perhaps you only want to perform Password Spraying on a specific group of users (SpearSpray allows it!)
 spearspray -u pentester -p Password123 -d fabrikam.local -dc dc01.fabrikam.local \
@@ -442,7 +449,7 @@ nslookup -type=SRV _ldap._tcp.pdc._msdcs.fabrikam.local
 # _ldap._tcp.pdc._msdcs.fabrikam.local service = 0 100 389 DC01.fabrikam.local.
 ```
 
-The PDC-emulator FQDN will be shown in the service record (e.g., `DC01.fabrikam.local`). Use this value with SpearSpray's `-dc` parameter to ensure you're always querying the most authoritative source for `badPwdCount` values.
+The PDC-emulator FQDN will be shown in the service record (e.g., `DC01.fabrikam.local`). Use this value with SpearSpray's `-dc` parameter to ensure you're always querying the most authoritative source for `badPwdCount` values. If the PDC-emulator does not expose Kerberos (88/tcp) but another DC does, keep `-dc` on the PDC-emulator for accurate enumeration and point the spraying to the reachable KDC with `-kdc`.
 
 **Why use the PDC-emulator?**
 - **Highest badPwdCount values**: The PDC-emulator typically holds the most up-to-date and highest `badPwdCount` values due to its role in account lockout processing
@@ -486,6 +493,7 @@ This tool is intended for authorized penetration testing and security assessment
    - Verify domain controller IP and credentials
    - Check network connectivity
    - Try with/without SSL flag
+   - If SpearSpray reports the LDAP port as closed but you know it is reachable, bypass the pre-flight check with `--skip-port-check`
 
 2. **No Users Found**
    - Verify LDAP query syntax
@@ -496,6 +504,8 @@ This tool is intended for authorized penetration testing and security assessment
    - Verify domain name format
    - Check time synchronization with domain controller
    - Ensure Kerberos ports (88) are accessible
+   - If port 88 is only reachable on a different DC, point the spraying to it with `-kdc/--kdc`
+   - Use `--skip-port-check` to bypass the pre-flight TCP check if it produces a false negative
 
 ## Acknowledgments
 
