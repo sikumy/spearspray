@@ -139,3 +139,9 @@ def variable_resolver(user: dict, selected_pattern: str, variables: list, extra:
 
     return selected_pattern.format(**values)
 
+
+_VOWEL_TO_NUMBER = str.maketrans("aeiouAEIOU", "4310743107")
+
+def apply_leet(password: str) -> str:
+    return password.translate(_VOWEL_TO_NUMBER)
+

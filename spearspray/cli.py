@@ -46,6 +46,7 @@ def parse_arguments():
     patterns_group.add_argument('-x', '--extra', type=str, default=None, help='Single word (no spaces or commas).')
     patterns_group.add_argument('-sep', '--separator', type=str, default=None, help='Separator for patterns.')
     patterns_group.add_argument('-suf', '--suffix', type=str, default=None, help='Suffix for patterns.')
+    patterns_group.add_argument('--leet', action='store_true', help='Replace vowels with numbers in generated passwords (a→4, e→3, i→1, o→0, u→7).')
     
     # Main parser
     parser = argparse.ArgumentParser(

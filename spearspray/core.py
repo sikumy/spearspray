@@ -11,7 +11,8 @@ from spearspray.utils.variables_utils import (
     register_variables,
     are_all_variables_registered,
     variable_resolver,
-    get_used_variables
+    get_used_variables,
+    apply_leet
 )
 from spearspray.utils.ldap_utils import (
     connect_to_ldap,
@@ -57,6 +58,7 @@ class SpearSpray:
         self.separator = args.separator
         self.suffix = args.suffix
         self.input_file = args.input
+        self.leet = args.leet
 
         # LDAP attributes to retrieve for each user (needed for pattern generation and PSO detection)
         self.fields = ["name", "sAMAccountName", "pwdLastSet", "whenCreated", "badPwdCount", "msDS-ResultantPSO"]
@@ -137,8 +139,11 @@ class SpearSpray:
             
             user: str = entry.get("sAMAccountName")                
             password: str = variable_resolver(entry, selected_pattern, filtered_variables, self.extra, self.separator, self.suffix,)
-                
-            yield (user, password) # Return a tuple of (username, password) for each user
+
+            if self.leet:
+                password = apply_leet(password)
+
+            yield (user, password)
 
     def _spray(self, kerberos_instance: Kerberos, users_objects: List[dict], selected_pattern: str, filtered_variables: List[str]) -> None:
 
